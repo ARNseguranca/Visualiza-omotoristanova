@@ -222,12 +222,20 @@
         .concat(agendados.map(p => L.latLng(p.coords[0], p.coords[1])));
 
       routingControl = L.Routing.control({
-        waypoints,
-        routeWhileDragging: false,
-        draggableWaypoints: false,
-        addWaypoints: false,
-        createMarker: () => null // NÃO cria marcadores (mantemos os fixos)
-      }).addTo(map);
+  waypoints,
+  routeWhileDragging: false,
+  draggableWaypoints: false,
+  addWaypoints: false,
+  createMarker: () => null, // mantém seus ícones fixos
+  show: false,              // remove painel lateral
+  collapsible: true
+}).addTo(map);
+
+// Esconde o container lateral do routing
+const routingContainer = document.querySelector('.leaflet-routing-container');
+if (routingContainer) {
+  routingContainer.style.display = 'none';
+}
     }
 
     function applyFilters() {
