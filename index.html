@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Visualização do Motorista</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+  <style>
+    body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background-color: #f4f7fc; color: #333; }
+    h2 { text-align: center; font-size: 28px; margin: 20px 0; color: #4CAF50; }
+    .container { max-width: 1200px; margin: auto; padding: 20px; }
+    .filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin-bottom: 20px; }
+    .filters select, .filters button { padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; min-width: 200px; }
+    .filters button { background-color: #4CAF50; color: #fff; border: none; cursor: pointer; }
+    .filters button:hover { background-color: #45a049; }
+    table { width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+    th, td { padding: 10px 15px; text-align: left; border: 1px solid #ddd; cursor: default; }
+    th { background-color: #f4f4f4; }
+    #map { height: 500px; margin-top: 20px; border-radius: 10px; display: none; }
+
+    /* Piscar estável (sem mover o ícone) */
+    @keyframes blinkGlow {
+      0%, 100% { filter: drop-shadow(0 0 0px #ff0) brightness(100%); }
+      50%      { filter: drop-shadow(0 0 16px #ff0) brightness(130%); }
+    }
+    .leaflet-marker-icon.blink-alert { animation: blinkGlow 1s ease-in-out infinite; z-index: 1000 !important; }
+    .leaflet-marker-icon.dimmed { opacity: 0.35; }
+
+    @media (max-width: 768px) {
+      .filters { flex-direction: column; align-items: center; }
+      .filters select, .filters button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <h2>Relatório Diário de Pontos Internos - Motorista</h2>
+  <div class="container">
+    <div class="filters">
+      <select id="hour-filter">
+        <option value="">Selecione um horário</option>
+      </select>
+      <button onclick="applyFilters()">Filtrar</button>
+      <button onclick="clearFilters()">Limpar</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Hora</th>
+          <th>Solicitante</th>
+          <th>Ponto Desejado</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+  <script>
+    // ---- CONFIG DA PLANILHA ----
+    const SHEET_ID = "132fh2lxEE2vzpfBmAbYCsk4UtRJAZ6fjdLEplUqbwFc";
+    const API_KEY  = "AIzaSyCkkBqKGxqPsBHK4-tQN_8DhdNMmX4gaqU";
+    const RANGE    = "A:E";
+    const URL      = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${RANGE}?key=${API_KEY}`;
+
+    let allData = [];
+    let filteredData = [];
+
+    // ---- PONTOS FIXOS ----
+    const pontos = [
+      {nome: "PORTARIA", coords: [-19.9978072, -43.9266727]},
+      {nome: "Ponto 30", coords: [-19.9977078, -43.9289372]},
+      {nome: "Ponto 28", coords: [-19.9986592, -43.9306448]},
+      {nome: "Ponto 29", coords: [-19.999421, -43.9326796]},
+      {nome: "Ponto 27", coords: [-20.0002531, -43.9314901]},
+      {nome: "Ponto 26", coords: [-20.0015469, -43.9333477]},
+      {nome: "Ponto 24", coords: [-20.003258, -43.9296246]},
+      {nome: "Ponto 25", coords: [-20.0050238, -43.9308419]},
+      {nome: "Ponto 21", coords: [-20.0027213, -43.9338594]},
+      {nome: "Ponto 22", coords: [-20.001474, -43.9355339]},
+      {nome: "Ponto 23", coords: [-20.0031588, -43.9364208]},
+      {nome: "Ponto 20", coords: [-20.0063663, -43.934352]},
+      {nome: "Ponto 19", coords: [-20.0085746, -43.9318072]},
+      {nome: "Ponto 17", coords: [-20.0104645, -43.9320381]},
+      {nome: "Ponto 18", coords: [-20.0088433, -43.9343321]},
+      {nome: "Ponto 12", coords: [-20.0088434, -43.9288248]},
+      {nome: "Ponto 13", coords: [-20.0094456, -43.9269802]},
+      {nome: "Ponto 14", coords: [-20.0075172, -43.9277972]},
+      {nome: "Ponto 16", coords: [-20.0068404, -43.9290337]},
+      {nome: "Ponto 15", coords: [-20.0079616, -43.9293497]},
+      {nome: "Ponto 09", coords: [-20.0110997, -43.9309597]},
+      {nome: "Ponto 10", coords: [-20.0120307, -43.9334509]},
+      {nome: "Ponto 11", coords: [-20.0098192, -43.9337648]},
+      {nome: "Ponto 08", coords: [-20.0102615, -43.9273848]},
+      {nome: "Ponto 05", coords: [-20.0114455, -43.9257426]},
+      {nome: "Ponto 06", coords: [-20.0112228, -43.9276231]},
+      {nome: "Ponto 07", coords: [-20.0108785, -43.9296971]},
+      {nome: "Ponto 04", coords: [-20.0068997, -43.9238609]},
+      {nome: "Ponto 03", coords: [-20.0047577, -43.9260624]},
+      {nome: "Ponto 02", coords: [-20.001753, -43.9270223]}
+    ];
+
+    // ---- MAPA / ESTADO ----
+    let map, routingControl, driverMarker, watchId = null;
+    const markersByName = {};
+
+    function getToday() {
+      const now = new Date();
+      return now.toLocaleDateString('pt-BR');
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch(URL);
+        const json = await res.json();
+        if (json?.values?.length > 1) {
+          const today = getToday();
+          allData = json.values.slice(1).filter(row => {
+            const data = (row[0] || '').split(" ")[0];
+            return data === today;
+          });
+          displayData(allData);
+          populateHourFilter(allData);
+        }
+      } catch (e) {
+        alert("Erro ao carregar os dados.");
+        console.error(e);
+      }
+    }
+
+    function displayData(data) {
+      const tbody = document.getElementById("table-body");
+      tbody.innerHTML = "";
+      data.forEach(row => {
+        const hora = (row[0] || "").split(" ")[1] || "";
+        const solicitante = row[1] || "";
+        const ponto = row[2] || "";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${hora}</td><td>${solicitante}</td><td>${ponto}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function populateHourFilter(data) {
+      const select = document.getElementById("hour-filter");
+      const prev = select.value; // preserva seleção
+      select.innerHTML = '<option value="">Selecione um horário</option>';
+      const uniqueHours = [...new Set(data.map(row => row[3]).filter(Boolean))];
+      uniqueHours.forEach(hour => {
+        const opt = document.createElement("option");
+        opt.value = hour;
+        opt.textContent = hour;
+        select.appendChild(opt);
+      });
+      if (uniqueHours.includes(prev)) select.value = prev;
+    }
+
+    function ensureMap() {
+      if (map) return;
+      map = L.map('map').setView([-19.9978072, -43.9266727], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const pontoIcon = L.icon({ iconUrl: 'Ponto.png', iconSize: [36, 36], iconAnchor: [18, 36] });
+      pontos.forEach(p => {
+        const m = L.marker(p.coords, { icon: pontoIcon }).addTo(map).bindPopup(p.nome);
+        markersByName[p.nome] = m;
+      });
+    }
+
+    function getMarkerEl(marker) {
+      return marker.getElement ? (marker.getElement() || marker._icon || null) : (marker._icon || null);
+    }
+
+    function clearAllBlink() {
+      Object.values(markersByName).forEach(m => {
+        const el = getMarkerEl(m);
+        if (el) {
+          el.classList.remove('blink-alert');
+          el.classList.remove('dimmed');
+          m.setZIndexOffset(0);
+        }
+      });
+    }
+
+    function setBlinkFor(names) {
+      // apaga todos como base
+      Object.values(markersByName).forEach(m => {
+        const el = getMarkerEl(m);
+        if (el) el.classList.add('dimmed');
+      });
+      // só os filtrados piscam (sem mover)
+      names.forEach(name => {
+        const m = markersByName[name];
+        if (!m) return;
+        const el = getMarkerEl(m);
+        if (!el) return setTimeout(() => {
+          const el2 = getMarkerEl(m);
+          if (el2) { el2.classList.remove('dimmed'); el2.classList.add('blink-alert'); m.setZIndexOffset(1000); }
+        }, 50);
+        el.classList.remove('dimmed');
+        el.classList.add('blink-alert');
+        m.setZIndexOffset(1000);
+      });
+    }
+
+    function pointsFromFiltered() {
+      const names = filteredData.map(row => row[2]).filter(Boolean);
+      return pontos.filter(p => names.includes(p.nome));
+    }
+
+    function updateRoute(userLatLng) {
+      if (routingControl) { map.removeControl(routingControl); routingControl = null; }
+      const agendados = pointsFromFiltered();
+      if (!agendados.length) return;
+
+      const waypoints = [L.latLng(userLatLng[0], userLatLng[1])]
+        .concat(agendados.map(p => L.latLng(p.coords[0], p.coords[1])));
+
+      routingControl = L.Routing.control({
+  waypoints,
+  routeWhileDragging: false,
+  draggableWaypoints: false,
+  addWaypoints: false,
+  createMarker: () => null, // mantém seus ícones fixos
+  show: false,              // remove painel lateral
+  collapsible: true
+}).addTo(map);
+
+// Esconde o container lateral do routing
+const routingContainer = document.querySelector('.leaflet-routing-container');
+if (routingContainer) {
+  routingContainer.style.display = 'none';
+}
+    }
+
+    function applyFilters() {
+      const hour = document.getElementById("hour-filter").value;
+      filteredData = hour ? allData.filter(row => row[3] === hour) : [];
+      displayData(filteredData);
+
+      if (!hour || filteredData.length === 0) {
+        document.getElementById("map").style.display = "none";
+        if (routingControl && map) { map.removeControl(routingControl); routingControl = null; }
+        clearAllBlink();
+        return;
+      }
+
+      ensureMap();
+      document.getElementById("map").style.display = "block";
+      setTimeout(() => map.invalidateSize(), 100);
+
+      const agendados = pointsFromFiltered();
+      clearAllBlink();
+      setBlinkFor(agendados.map(p => p.nome));
+
+      const busIcon = L.icon({ iconUrl: 'onibus.png', iconSize: [40, 40], iconAnchor: [20, 20] });
+
+      const onPosition = pos => {
+        const userLatLng = [pos.coords.latitude, pos.coords.longitude];
+        if (!driverMarker) {
+          driverMarker = L.marker(userLatLng, { icon: busIcon }).addTo(map).bindPopup("Você está aqui");
+        } else {
+          driverMarker.setLatLng(userLatLng);
+        }
+        updateRoute(userLatLng);
+      };
+
+      const onError = () => {
+        const group = L.featureGroup(agendados.map(p => markersByName[p.nome]));
+        map.fitBounds(group.getBounds().pad(0.3));
+      };
+
+      if (navigator.geolocation) {
+        if (watchId === null) {
+          watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+            enableHighAccuracy: true, maximumAge: 5000, timeout: 10000
+          });
+        }
+      } else { onError(); }
+
+      if (agendados.length) {
+        const group = L.featureGroup(agendados.map(p => markersByName[p.nome]));
+        map.fitBounds(group.getBounds().pad(0.3));
+      }
+    }
+
+    function clearFilters() {
+      document.getElementById("hour-filter").value = "";
+      displayData(allData);
+      clearAllBlink();
+      if (map && routingControl) { map.removeControl(routingControl); routingControl = null; }
+      document.getElementById("map").style.display = "none";
+    }
+
+    // Carrega dados uma única vez (SEM atualização automática)
+    fetchData();
+  </script>
+</body>
+</html>
